@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Untukmu ♥</title>
+<style>
+  /* ---- design tokens ---- */
+  :root{
+    --bg:#07040f; --ink:#ffe9f3; --rose:#ff4d79; --gold:#ffd6a5; --violet:#8b5cf6;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *,*::before,*::after{box-sizing:inherit}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font-family:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif}
+  canvas{display:block}
+
+  /* ---- entry gate ---- */
+  #gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;text-align:center;padding:24px;z-index:20;
+    background:radial-gradient(ellipse at 50% 40%,#2a0f2e 0%,#0b0616 55%,#07040f 100%)}
+  #gate h1{font-size:clamp(26px,6vw,46px);font-weight:300;letter-spacing:.06em;margin:0}
+  #gate p{opacity:.6;font-size:clamp(13px,3.2vw,16px);margin:0;max-width:34ch;line-height:1.6}
+  #name{width:min(360px,80vw);padding:14px 18px;border-radius:999px;border:1px solid rgba(255,255,255,.18);
+    background:rgba(255,255,255,.05);color:var(--ink);font-size:16px;text-align:center;outline:none;
+    transition:border-color .3s,box-shadow .3s}
+  #name:focus{border-color:var(--rose);box-shadow:0 0 24px rgba(255,77,121,.35)}
+  #enter{padding:13px 34px;border-radius:999px;border:0;cursor:pointer;font-size:15px;letter-spacing:.08em;
+    color:#1a0710;background:linear-gradient(120deg,var(--gold),var(--rose));
+    box-shadow:0 10px 40px rgba(255,77,121,.35);transition:transform .25s,box-shadow .25s}
+  #enter:hover{transform:translateY(-2px);box-shadow:0 14px 50px rgba(255,77,121,.5)}
+  .hint{font-size:11px;opacity:.35;letter-spacing:.1em;text-transform:uppercase}
+
+  /* ---- cinematic overlay ---- */
+  #stage{position:fixed;inset:0;z-index:10;pointer-events:none;display:flex;
+    flex-direction:column;align-items:center;justify-content:flex-end;padding:0 24px 12vh}
+  #caption{font-size:clamp(15px,3.6vw,22px);font-weight:300;letter-spacing:.05em;opacity:0;
+    text-align:center;text-shadow:0 0 30px rgba(255,77,121,.6);max-width:26ch;line-height:1.7}
+  #finale{position:fixed;inset:0;z-index:11;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:10px;pointer-events:none;opacity:0;text-align:center;padding:24px}
+  #finale .big{font-size:clamp(34px,9vw,86px);font-weight:200;letter-spacing:.12em;
+    background:linear-gradient(120deg,#fff,var(--gold),var(--rose));-webkit-background-clip:text;
+    background-clip:text;color:transparent;text-shadow:0 0 60px rgba(255,77,121,.25)}
+  #finale .sub{font-size:clamp(14px,3.4vw,20px);opacity:.85;font-weight:300;letter-spacing:.06em}
+
+  /* ---- controls ---- */
+  #ui{position:fixed;top:0;right:0;z-index:15;display:none;gap:8px;
+    padding:calc(14px + env(safe-area-inset-top,0px)) 14px 0 0}
+  #ui button{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:var(--ink);
+    border-radius:999px;padding:8px 14px;font-size:12px;cursor:pointer;backdrop-filter:blur(6px)}
+  #ui button:hover{background:rgba(255,255,255,.14)}
+  @media (max-width:520px){#stage{padding-bottom:16vh}}
+</style>
+</head>
+<body>
+
+<!-- ENTRY GATE: name input. The click here is the user gesture that unlocks audio. -->
+<div id="gate">
+  <h1>Ada sesuatu untukmu…</h1>
+  <p>Tulis namamu dulu, lalu biarkan layar ini bercerita.</p>
+  <input id="name" placeholder="Namamu…" maxlength="18" autocomplete="off" spellcheck="false">
+  <button id="enter">MASUK ♥</button>
+  <span class="hint">gunakan headphone · butuh suara</span>
+</div>
+
+<!-- Cinematic caption line + final reveal -->
+<div id="stage"><div id="caption"></div></div>
+<div id="finale"><div class="big">I LOVE YOU</div><div class="sub"></div></div>
+
+<div id="ui"><button id="mute">♪ Musik</button><button id="replay">↺ Ulangi</button></div>
+
+<!-- Put your song next to this file and name it music.mp3 -->
+<audio id="bgm" src="music.mp3" loop preload="auto"></audio>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+/* =========================================================================
+   CONFIG — edit everything you need here
+   ========================================================================= */
+const CFG = {
+  colors:{ rose:0xff4d79, violet:0x8b5cf6, gold:0xffd6a5, glow:0xff86ab },
+  particles: window.innerWidth < 720 ? 2600 : 5200,  // auto-scaled for mobile
+  hearts:    window.innerWidth < 720 ? 26   : 46,
+  lines:[    // captions, in order, during the ~22s sequence
+    "Dari sekian banyak orang di dunia ini…",
+    "semesta memilih untuk mempertemukan kita.",
+    "Dan sejak itu, semuanya terasa berbeda."
+  ],
+  finalSub: (name)=> `${name}, maukah kamu jadi alasan aku tersenyum setiap hari?`
+};
+
+/* =========================================================================
+   SCENE SETUP
+   ========================================================================= */
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));   // cap DPR = perf guard
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x07040f, 0.0125);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0,0,70);
+
+scene.add(new THREE.AmbientLight(0x442255, 1.1));
+const l1 = new THREE.PointLight(CFG.colors.rose, 2.6, 160);   l1.position.set(18,14,26); scene.add(l1);
+const l2 = new THREE.PointLight(CFG.colors.violet, 2.2, 160); l2.position.set(-22,-10,18); scene.add(l2);
+
+/* Soft round sprite texture generated in-canvas (no external images needed) */
+function dotTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d').createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(.35,'rgba(255,190,220,.65)');
+  g.addColorStop(1,'rgba(255,120,170,0)');
+  const ctx = c.getContext('2d'); ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+const SPRITE = dotTexture();
+
+/* =========================================================================
+   STARFIELD — slow parallax backdrop
+   ========================================================================= */
+const starPos = new Float32Array(1200*3);
+for(let i=0;i<1200;i++){
+  const r = 120 + Math.random()*140, t = Math.random()*Math.PI*2, p = Math.acos(2*Math.random()-1);
+  starPos.set([r*Math.sin(p)*Math.cos(t), r*Math.sin(p)*Math.sin(t), r*Math.cos(p)], i*3);
+}
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos,3));
+const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+  size:1.1, map:SPRITE, transparent:true, opacity:.55, depthWrite:false, blending:THREE.AdditiveBlending
+}));
+scene.add(stars);
+
+/* =========================================================================
+   MORPHING PARTICLE SYSTEM  (scatter -> NAME -> HEART)
+   Three target position sets are precomputed; a frame lerps between them.
+   ========================================================================= */
+const N = CFG.particles;
+const scatter = new Float32Array(N*3);
+const nameTgt = new Float32Array(N*3);
+const heartT  = new Float32Array(N*3);
+const seeds   = new Float32Array(N);
+const live    = new Float32Array(N*3);
+
+for(let i=0;i<N;i++){
+  scatter.set([(Math.random()-.5)*150,(Math.random()-.5)*100,(Math.random()-.5)*120], i*3);
+  seeds[i] = Math.random()*Math.PI*2;
+}
+
+/* Heart target: classic parametric heart curve, filled and given depth */
+for(let i=0;i<N;i++){
+  const t = Math.random()*Math.PI*2, r = 0.55 + Math.random()*0.45;
+  const x = 16*Math.pow(Math.sin(t),3);
+  const y = 13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+  heartT.set([x*r*0.95, y*r*0.95+2, (Math.random()-.5)*6*r], i*3);
+}
+
+/* Name target: draw text to a 2D canvas, sample opaque pixels, map to 3D */
+function buildNameTargets(name){
+  const c = document.createElement('canvas'), ctx = c.getContext('2d');
+  c.width = 900; c.height = 220;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  let size = 150;
+  do{ ctx.font = `700 ${size}px "Segoe UI",Arial,sans-serif`; size -= 6; }
+  while(ctx.measureText(name).width > 820 && size > 30);
+  ctx.fillText(name, c.width/2, c.height/2);
+
+  const data = ctx.getImageData(0,0,c.width,c.height).data, pts = [];
+  for(let y=0;y<c.height;y+=3) for(let x=0;x<c.width;x+=3)
+    if(data[(y*c.width+x)*4+3] > 128) pts.push([x,y]);
+
+  const S = 0.055;
+  for(let i=0;i<N;i++){
+    const p = pts.length ? pts[(Math.random()*pts.length)|0] : [c.width/2,c.height/2];
+    nameTgt.set([
+      (p[0]-c.width/2)*S + (Math.random()-.5)*0.18,
+      -(p[1]-c.height/2)*S + (Math.random()-.5)*0.18,
+      (Math.random()-.5)*1.6
+    ], i*3);
+  }
+}
+
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(live,3));
+const pMat = new THREE.PointsMaterial({
+  size:0.5, map:SPRITE, color:CFG.colors.glow, transparent:true,
+  opacity:.95, depthWrite:false, blending:THREE.AdditiveBlending
+});
+const points = new THREE.Points(pGeo, pMat);
+scene.add(points);
+
+/* State the timeline animates. m: scatter->name, h: name->heart */
+const S = { m:0, h:0, spin:0, chaos:1 };
+
+/* =========================================================================
+   FLOATING 3D HEARTS — extruded shape meshes drifting upward
+   ========================================================================= */
+const shape = new THREE.Shape();
+shape.moveTo(0,0.5);
+shape.bezierCurveTo(0,0.9, -0.6,1.3, -0.95,0.6);
+shape.bezierCurveTo(-1.35,-0.2, -0.35,-0.7, 0,-1.2);
+shape.bezierCurveTo(0.35,-0.7, 1.35,-0.2, 0.95,0.6);
+shape.bezierCurveTo(0.6,1.3, 0,0.9, 0,0.5);
+const heartGeo = new THREE.ExtrudeGeometry(shape,{depth:.35,bevelEnabled:true,bevelSize:.12,bevelThickness:.12,bevelSegments:2,curveSegments:14});
+heartGeo.center();
+
+const floaters = [];
+for(let i=0;i<CFG.hearts;i++){
+  const m = new THREE.Mesh(heartGeo, new THREE.MeshStandardMaterial({
+    color: i%3===0 ? CFG.colors.gold : CFG.colors.rose,
+    emissive: CFG.colors.rose, emissiveIntensity:.45,
+    roughness:.25, metalness:.35, transparent:true, opacity:.9
+  }));
+  m.position.set((Math.random()-.5)*90, -40 - Math.random()*70, (Math.random()-.5)*60);
+  m.rotation.set(Math.random()*3, Math.random()*3, Math.random()*3);
+  m.scale.setScalar(.6 + Math.random()*1.5);
+  m.userData = { speed:.06 + Math.random()*.14, spin:(Math.random()-.5)*.012, sway:Math.random()*6 };
+  scene.add(m); floaters.push(m);
+}
+
+/* =========================================================================
+   AUDIO — real file if present, procedural pad as fallback (autoplay-safe:
+   everything is kicked off inside the button click handler).
+   ========================================================================= */
+const bgm = document.getElementById('bgm');
+let audioCtx, padGain, muted = false;
+
+function startAudio(){
+  bgm.volume = 0;
+  const tryFile = bgm.play();
+  if(tryFile && tryFile.then){
+    tryFile.then(()=> gsap.to(bgm,{volume:.55,duration:4}))   // gentle fade-in
+           .catch(()=> proceduralPad());                       // no music.mp3 → fallback
+  } else proceduralPad();
+}
+/* Fallback ambient chord so the page is never silent */
+function proceduralPad(){
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  padGain = audioCtx.createGain(); padGain.gain.value = 0; padGain.connect(audioCtx.destination);
+  [174.6,220,261.6,329.6].forEach((f,i)=>{
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = i%2 ? 'sine':'triangle'; o.frequency.value = f;
+    g.gain.value = .12/(i+1); o.connect(g); g.connect(padGain); o.start();
+    const lfo = audioCtx.createOscillator(), la = audioCtx.createGain();
+    lfo.frequency.value = .05 + i*.02; la.gain.value = 1.2;
+    lfo.connect(la); la.connect(o.frequency); lfo.start();
+  });
+  padGain.gain.linearRampToValueAtTime(.5, audioCtx.currentTime + 5);
+}
+document.getElementById('mute').onclick = ()=>{
+  muted = !muted;
+  bgm.muted = muted;
+  if(padGain) padGain.gain.value = muted ? 0 : .5;
+  document.getElementById('mute').textContent = muted ? '♪ Nyalakan' : '♪ Musik';
+};
+
+/* =========================================================================
+   THE 22-SECOND CINEMATIC TIMELINE
+   ========================================================================= */
+const capEl = document.getElementById('caption');
+const finEl = document.getElementById('finale');
+let userName = 'Kamu';
+
+function say(text, hold){
+  gsap.timeline()
+    .call(()=> capEl.textContent = text)
+    .fromTo(capEl,{opacity:0,y:18},{opacity:1,y:0,duration:1.1,ease:'power2.out'})
+    .to(capEl,{opacity:0,y:-14,duration:.9,ease:'power2.in'},`+=${hold}`);
+}
+
+function runSequence(){
+  const tl = gsap.timeline();
+  // 0–5s · fly in through the dust
+  tl.to(camera.position,{z:34,duration:5,ease:'power2.inOut'},0)
+    .to(S,{chaos:.25,duration:5,ease:'power2.out'},0)
+    .call(()=> say(CFG.lines[0], 1.6), null, 1.2)
+  // 5–10s · particles gather into the visitor's name
+    .to(S,{m:1,duration:3.4,ease:'power3.inOut'},5)
+    .to(camera.position,{z:24,duration:4,ease:'power2.inOut'},5)
+    .to(pMat,{size:.42,duration:3},5)
+    .call(()=> say(CFG.lines[1], 1.8), null, 9.2)
+  // 10–15s · orbit around the name
+    .to(S,{spin:0.55,duration:5,ease:'sine.inOut'},10)
+    .call(()=> say(CFG.lines[2], 1.4), null, 13.6)
+  // 15–19s · the name dissolves and re-forms as a heart
+    .to(S,{h:1,duration:3.6,ease:'power3.inOut'},15.2)
+    .to(S,{spin:0,duration:3.6,ease:'sine.inOut'},15.2)
+    .to(camera.position,{z:42,duration:4,ease:'power2.inOut'},15.2)
+    .to(pMat,{size:.62,duration:3.6},15.2)
+  // 19–22s · reveal
+    .call(()=>{
+      finEl.querySelector('.sub').textContent = CFG.finalSub(userName);
+      burst();
+    }, null, 19)
+    .to(finEl,{opacity:1,duration:2,ease:'power2.out'},19)
+    .to(camera.position,{z:36,duration:6,ease:'sine.inOut'},19)
+    .call(()=> document.getElementById('ui').style.display='flex', null, 21);
+}
+
+/* Confetti-ish heart burst at the reveal */
+function burst(){
+  floaters.forEach((m,i)=>{
+    gsap.to(m.position,{y:m.position.y+40+Math.random()*30,duration:3+Math.random()*2,ease:'power2.out',delay:i*.02});
+    gsap.fromTo(m.scale,{x:m.scale.x,y:m.scale.y,z:m.scale.z},
+      {x:m.scale.x*1.5,y:m.scale.y*1.5,z:m.scale.z*1.5,duration:1.4,yoyo:true,repeat:1,ease:'power2.out'});
+  });
+}
+
+/* =========================================================================
+   ENTRY GATE HANDLING
+   ========================================================================= */
+const gate = document.getElementById('gate'), nameInput = document.getElementById('name');
+function enter(){
+  userName = (nameInput.value.trim() || 'Kamu').slice(0,18);
+  buildNameTargets(userName);
+  startAudio();                                   // must stay inside this click
+  gsap.to(gate,{opacity:0,duration:1.2,ease:'power2.inOut',
+    onComplete:()=> gate.style.display='none'});
+  runSequence();
+}
+document.getElementById('enter').onclick = enter;
+nameInput.addEventListener('keydown', e=>{ if(e.key==='Enter') enter(); });
+
+document.getElementById('replay').onclick = ()=>{
+  gsap.killTweensOf([S,camera.position,pMat,finEl]);
+  Object.assign(S,{m:0,h:0,spin:0,chaos:1});
+  camera.position.z = 70; pMat.size = .5; finEl.style.opacity = 0;
+  document.getElementById('ui').style.display='none';
+  runSequence();
+};
+
+/* =========================================================================
+   RENDER LOOP
+   ========================================================================= */
+const mouse = {x:0,y:0};
+addEventListener('pointermove', e=>{
+  mouse.x = (e.clientX/innerWidth - .5); mouse.y = (e.clientY/innerHeight - .5);
+});
+
+const pos = pGeo.attributes.position.array;
+const clock = new THREE.Clock();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Blend the three position sets + organic drift
+  for(let i=0;i<N;i++){
+    const k = i*3, s = seeds[i];
+    const bx = scatter[k]   + (nameTgt[k]  -scatter[k])  *S.m;
+    const by = scatter[k+1] + (nameTgt[k+1]-scatter[k+1])*S.m;
+    const bz = scatter[k+2] + (nameTgt[k+2]-scatter[k+2])*S.m;
+    const dx = Math.sin(t*.6 + s)*1.6*S.chaos + Math.sin(t*1.7+s)*.12;
+    const dy = Math.cos(t*.5 + s)*1.6*S.chaos + Math.cos(t*1.4+s)*.12;
+    pos[k]   = bx + (heartT[k]  -bx)*S.h + dx;
+    pos[k+1] = by + (heartT[k+1]-by)*S.h + dy;
+    pos[k+2] = bz + (heartT[k+2]-bz)*S.h;
+  }
+  pGeo.attributes.position.needsUpdate = true;
+  points.rotation.y = S.spin * Math.sin(t*.35);
+
+  // Floating hearts rise, sway and spin; recycle at the top
+  floaters.forEach(m=>{
+    m.position.y += m.userData.speed;
+    m.position.x += Math.sin(t*.4 + m.userData.sway)*.012;
+    m.rotation.y += m.userData.spin; m.rotation.x += m.userData.spin*.6;
+    if(m.position.y > 55){ m.position.y = -55; m.position.x = (Math.random()-.5)*90; }
+  });
+
+  stars.rotation.y = t*.008; stars.rotation.x = t*.004;
+  l1.position.x = Math.sin(t*.4)*24; l1.position.z = Math.cos(t*.4)*24;
+  l2.position.x = Math.cos(t*.3)*26; l2.position.y = Math.sin(t*.3)*16;
+
+  // Subtle mouse parallax
+  camera.position.x += (mouse.x*9 - camera.position.x)*.03;
+  camera.position.y += (-mouse.y*6 - camera.position.y)*.03;
+  camera.lookAt(0,0,0);
+
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+});
+</script>
+</body>
+</html>
